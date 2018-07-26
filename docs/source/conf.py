@@ -16,6 +16,8 @@
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 
+import sphinx_rtd_theme
+
 
 # -- Project information -----------------------------------------------------
 
@@ -40,8 +42,11 @@ release = '0.1'
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
-    'sphinx.ext.imgmath',
+    'sphinx.ext.mathjax',
+    'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
 ]
 
@@ -51,8 +56,8 @@ templates_path = ['_templates']
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
-# source_suffix = ['.rst', '.md']
-source_suffix = '.rst'
+source_suffix = ['.rst', '.md']
+# source_suffix = '.rst'
 
 # The master toctree document.
 master_doc = 'index'
@@ -70,7 +75,7 @@ language = None
 exclude_patterns = []
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
+pygments_style = 'friendly'
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -78,13 +83,20 @@ pygments_style = 'sphinx'
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'alabaster'
+# html_theme = 'classic'
+html_theme = 'sphinx_rtd_theme'
+html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
-# html_theme_options = {}
+html_theme_options = {
+    # 'canonical_url': 'https://pytorch.org/docs/stable/',
+    'collapse_navigation': False,
+    'display_version': True,
+    'logo_only': True,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -100,6 +112,13 @@ html_static_path = ['_static']
 # 'searchbox.html']``.
 #
 # html_sidebars = {}
+
+html_context = {
+    'css_files': [
+        'https://fonts.googleapis.com/css?family=Lato',
+        '_static/css/pytorch_theme.css'
+    ],
+}
 
 
 # -- Options for HTMLHelp output ---------------------------------------------
@@ -160,8 +179,63 @@ texinfo_documents = [
 
 
 # -- Extension configuration -------------------------------------------------
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/', None),
+    'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+}
 
 # -- Options for todo extension ----------------------------------------------
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
+
+# -- A patch that prevents Sphinx from cross-referencing ivar tags -------
+# See http://stackoverflow.com/a/41184353/3343043
+from docutils import nodes
+from sphinx.util.docfields import TypedField
+from sphinx import addnodes
+
+
+def patched_make_field(self, types, domain, items, **kw):
+    # `kw` catches `env=None` needed for newer sphinx while maintaining
+    #  backwards compatibility when passed along further down!
+
+    # type: (List, unicode, Tuple) -> nodes.field
+    def handle_item(fieldarg, content):
+        par = nodes.paragraph()
+        par += addnodes.literal_strong('', fieldarg)  # Patch: this line added
+        # par.extend(self.make_xrefs(self.rolename, domain, fieldarg,
+        #                           addnodes.literal_strong))
+        if fieldarg in types:
+            par += nodes.Text(' (')
+            # NOTE: using .pop() here to prevent a single type node to be
+            # inserted twice into the doctree, which leads to
+            # inconsistencies later when references are resolved
+            fieldtype = types.pop(fieldarg)
+            if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
+                typename = u''.join(n.astext() for n in fieldtype)
+                typename = typename.replace('int', 'python:int')
+                typename = typename.replace('long', 'python:long')
+                typename = typename.replace('float', 'python:float')
+                typename = typename.replace('type', 'python:type')
+                par.extend(self.make_xrefs(self.typerolename, domain, typename,
+                                           addnodes.literal_emphasis, **kw))
+            else:
+                par += fieldtype
+            par += nodes.Text(')')
+        par += nodes.Text(' -- ')
+        par += content
+        return par
+
+    fieldname = nodes.field_name('', self.label)
+    if len(items) == 1 and self.can_collapse:
+        fieldarg, content = items[0]
+        bodynode = handle_item(fieldarg, content)
+    else:
+        bodynode = self.list_type()
+        for fieldarg, content in items:
+            bodynode += nodes.list_item('', handle_item(fieldarg, content))
+    fieldbody = nodes.field_body('', bodynode)
+    return nodes.field('', fieldname, fieldbody)
+
+TypedField.make_field = patched_make_field
